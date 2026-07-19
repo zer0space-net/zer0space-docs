@@ -54,6 +54,26 @@ networks:
     # the name every other stack must reference below.
     attachable: true
 
+# ── Better once more than one stack depends on it ────────────────────────────
+#
+# The above lets the tunnel stack own the network, which is fine while it is the
+# only stack. Once other stacks attach to it, that ownership becomes a liability:
+# redeploying or removing the tunnel stack can disturb a network those stacks are
+# still using.
+#
+# The cleaner arrangement is to create the network once, by hand, and declare it
+# external EVERYWHERE — including in the tunnel stack itself:
+#
+#   docker network create --driver overlay --attachable cloudflared_proxy
+#
+# networks:
+#   cloudflared_proxy:
+#     external: true
+#
+# No stack owns it, and a missing network then fails loudly at deploy time
+# ("network cloudflared_proxy not found") instead of being silently recreated
+# with different properties.
+
 # ══ STACK 2: any service you want to publish ═════════════════════════════════
 # Deploy separately. Shown here in the same file only to keep the pattern
 # together — these are two independent stacks.
