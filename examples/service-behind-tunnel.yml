@@ -1,0 +1,124 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Pattern: a service published through a Cloudflare Tunnel
+#
+# Generic example — every name, port and hostname is a placeholder.
+#
+# The idea: cloudflared opens an OUTBOUND connection to Cloudflare and public
+# traffic is pushed back down it. Nothing listens for inbound connections, so
+# there is no port forward on the router and the origin IP is never exposed.
+# There is no reverse proxy — Cloudflare terminates TLS and routes per hostname
+# straight to a Swarm service DNS name.
+#
+# Deploy as two separate stacks: the tunnel once, then any number of services.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ══ STACK 1: the tunnel ══════════════════════════════════════════════════════
+# Deploy this once, under a stack name of "cloudflared".
+
+services:
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --no-autoupdate run
+    environment:
+      # Token mode: this single value carries the tunnel's credentials, so
+      # nothing is written to disk and the service is completely stateless.
+      #
+      # NEVER commit the token. Inject it at deploy time — as a stack
+      # environment variable in your GitOps UI, or as a Docker secret.
+      - TUNNEL_TOKEN=${TUNNEL_TOKEN}
+    networks:
+      - proxy
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      placement:
+        constraints:
+          # Managers only: they are the stable, long-lived nodes here.
+          - node.role == manager
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 128M
+        reservations:
+          cpus: '0.05'
+          memory: 32M
+
+networks:
+  proxy:
+    driver: overlay
+    # attachable so other stacks can join this network as external.
+    #
+    # NAMING: Swarm prefixes network names with the stack name. Deployed as the
+    # stack "cloudflared", this network becomes "cloudflared_proxy" — that is
+    # the name every other stack must reference below.
+    attachable: true
+
+# ══ STACK 2: any service you want to publish ═════════════════════════════════
+# Deploy separately. Shown here in the same file only to keep the pattern
+# together — these are two independent stacks.
+#
+# services:
+#   web:
+#     image: your/image:tag
+#     networks:
+#       # Join the tunnel's network so cloudflared can reach this container.
+#       - cloudflared_proxy
+#       # Optional second network for internal traffic that must NOT be public.
+#       - internal
+#
+#     # NOTE: no "ports:" section. The whole point is that nothing is published
+#     # on any host. cloudflared reaches the container over the overlay network.
+#     # Add a ports mapping only if you also want direct LAN access.
+#
+#     deploy:
+#       replicas: 1
+#       restart_policy:
+#         condition: any        # Swarm ignores top-level "restart:" — use this.
+#       resources:
+#         limits:
+#           cpus: '1.00'
+#           memory: 512M
+#         reservations:
+#           cpus: '0.05'
+#           memory: 128M
+#
+# networks:
+#   cloudflared_proxy:
+#     external: true            # created by the tunnel stack above
+#   internal:
+#     driver: overlay
+
+# ══ Cloudflare-side configuration ════════════════════════════════════════════
+#
+# In the Cloudflare dashboard: Zero Trust → Networks → Tunnels → your tunnel →
+# Public Hostnames → Add a public hostname:
+#
+#   Hostname:  app.example.com
+#   Service:   http://<stack-name>_<service-name>:<container-port>
+#
+# For the service above deployed as the stack "web":  http://web_web:8080
+#
+# The service name resolves over the overlay network — it is Swarm's internal
+# DNS, not anything you configure. Use the CONTAINER port, not a host port.
+#
+# ── Put an auth layer in front of it ─────────────────────────────────────────
+#
+# Zero Trust → Access → Applications → Add an application covering that
+# hostname, with a policy requiring e-mail OTP plus authenticator MFA.
+#
+# This runs at Cloudflare's edge, so an unauthenticated request never reaches
+# your origin at all — it does not even get to see a login form.
+#
+# Keep the application's own authentication as well. The edge layer protects the
+# tunnel path; it does nothing for a request that arrives over the LAN or the
+# management VPN. Two independent layers, neither trusting the other.
+#
+# ── Constraints to know before you build on this ─────────────────────────────
+#
+#   * Cloudflare's terms prohibit continuous video streaming through the CDN.
+#     Route media over a VPN instead.
+#   * The tunnel carries HTTP/HTTPS only. WireGuard/UDP does not traverse it.
+#   * TLS terminates at Cloudflare. Traffic from the edge to your origin follows
+#     whatever the public hostname specifies — plain http:// inside your own
+#     network is a deliberate choice, not an oversight, but make it knowingly.

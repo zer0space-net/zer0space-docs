@@ -1,0 +1,142 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Pattern: persistent storage for a STATELESS Docker Swarm
+#
+# Generic example — every name, path and address is a placeholder.
+#
+# THE PROBLEM
+# Swarm does not replicate volumes. A container that writes to a local path is
+# married to the node it started on. The usual workaround is to pin the service
+# with placement.constraints so it always finds its data again — which quietly
+# turns every node into a single point of failure wearing a cluster costume.
+#
+# THE FIX
+# Put the files on one storage host outside the cluster, exported over NFS and
+# mounted at the SAME PATH on every Swarm node. Now a service finds its data no
+# matter where it is scheduled, and nothing needs pinning for storage reasons.
+#
+# Two variants below. Read the failure mode on variant A before choosing.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ══ HOST PREREQUISITE (both variants) ════════════════════════════════════════
+#
+# On the storage host — export the share:
+#   /etc/exports:
+#     /srv/nfs/swarm-data  10.0.0.0/24(rw,sync,no_subtree_check,no_root_squash)
+#   exportfs -ra
+#
+# On EVERY Swarm node — mount it at an identical path, persistent across reboot:
+#   /etc/fstab:
+#     10.0.0.10:/srv/nfs/swarm-data  /mnt/storage  nfs  defaults,_netdev  0 0
+#   mount -a
+#
+# Verify on every node before deploying anything:
+#   mountpoint -q /mnt/storage && echo OK || echo "NOT MOUNTED — do not deploy"
+#
+# (10.0.0.10 is a placeholder for the storage host.)
+
+# ══ VARIANT A — host bind mount (simple) ═════════════════════════════════════
+
+services:
+  app:
+    image: your/image:tag
+
+    volumes:
+      # The host path is the NFS mount. Because it exists on every node, this
+      # bind mount resolves correctly wherever the task lands.
+      - /mnt/storage/myapp:/data
+
+    # No placement.constraints. That is the entire point — the service is free
+    # to be scheduled anywhere, and it finds its data when it gets there.
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: any            # Swarm ignores top-level "restart:"
+      resources:
+        limits:
+          cpus: '1.00'
+          memory: 512M
+        reservations:
+          cpus: '0.05'
+          memory: 128M
+
+    # ⚠  THE FAILURE MODE OF THIS VARIANT
+    #
+    # If /mnt/storage is NOT mounted on a node, Docker does not fail. It
+    # silently creates an empty directory at that path and starts the container
+    # against it. The service comes up looking healthy, with no data.
+    #
+    # Worse: it may then WRITE into that empty local directory, so you end up
+    # with divergent state on a node nobody is looking at.
+    #
+    # If this ever happens, fix the mount and redeploy. Do NOT "restore" or
+    # re-seed anything before checking what is actually still on the storage
+    # host — the real data is almost certainly fine and untouched.
+    #
+    # Variant B below fails loudly instead.
+
+# ══ VARIANT B — Swarm-managed NFS volume (fails loudly) ══════════════════════
+#
+# Here Swarm mounts the share itself, per task. If the storage host is
+# unreachable, the task FAILS TO START rather than starting empty — which is
+# the behaviour you want for anything you care about.
+#
+# services:
+#   app:
+#     image: your/image:tag
+#     volumes:
+#       - app_data:/data
+#     deploy:
+#       replicas: 1
+#       restart_policy:
+#         condition: any
+#
+# volumes:
+#   app_data:
+#     driver: local
+#     driver_opts:
+#       type: nfs
+#       o: "addr=10.0.0.10,nfsvers=4,rw,soft"
+#       device: ":/srv/nfs/swarm-data/myapp"
+#
+# Notes:
+#   * The target directory must already exist on the storage host — the NFS
+#     driver will not create it for you.
+#   * "soft" lets I/O fail with an error instead of hanging forever when the
+#     server disappears. "hard" is safer for data integrity but blocks
+#     indefinitely; pick deliberately per service.
+#   * Volumes are stack-scoped: this becomes "<stackname>_app_data".
+#
+# TRADE-OFF: variant A keeps compose files readable and reuses one host-level
+# mount you have to maintain anyway. Variant B is more robust but repeats the
+# server address in every stack. A is fine when you actually verify the mount;
+# B is worth it for anything whose silent-empty-start would be expensive.
+
+# ══ WHAT STILL BELONGS ELSEWHERE ═════════════════════════════════════════════
+#
+#   * DATABASES. Do not put a database's data directory on NFS. File locking
+#     over NFS is a well-known source of corruption — SQLite especially, but the
+#     concern is not limited to it. Run the database on a dedicated host and
+#     reach it over the network, so the application holds no database state.
+#
+#   * STATELESS SERVICES need none of this. Check before adding a volume: a
+#     tunnel daemon in token mode, or a converter that works in container temp
+#     space, has nothing worth persisting.
+#
+#   * NODE-LOCAL RESOURCES are still a legitimate reason to pin a service —
+#     a manager's Docker socket, a "mode: global" agent, hardware on one host.
+#     Storage is no longer one of those reasons. Pin for those, never for data.
+#
+# ══ BACKUPS ══════════════════════════════════════════════════════════════════
+#
+# Consolidating storage onto one host makes that host a single point of failure.
+# It is a much better single point of failure than seven scattered ones — it can
+# actually be backed up — but only if you follow through:
+#
+#   * Back the share up to a DIFFERENT machine. Data and backup on the same host
+#     is not a backup.
+#   * Watch for the silent gap: if you migrate data ONTO this share, any backup
+#     job still pointed at the old location keeps reporting success while
+#     capturing less and less of what matters.
+#   * Back up databases separately. They are not on this share, so a job that
+#     archives the share does not cover them.
+#   * Test a restore. An untested backup is a hypothesis.
