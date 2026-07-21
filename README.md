@@ -79,6 +79,13 @@ That last row is the honest gap in this build. It is
 4. **The dangerous backup failure is not the one that breaks.** It is the one that
    keeps reporting success after the data quietly moved somewhere else.
 
+## May
+
+The mascot watching over all this — seven interchangeable nodes, two anchors
+that actually hold state, a tunnel that only calls out, an overlay that quietly
+lied for a while. The full story is in
+[`may (mascot)/story.md`](may%20(mascot)/story.md).
+
 ## Related repositories
 
 The deployable configuration and application source live in separate, private

@@ -1,7 +1,7 @@
 # May
 
-> The zer0space mascot. She doesn't run any of the nine machines — she watches
-> all of them, so somebody else doesn't have to.
+> Sige0's assistant, and the zer0space mascot. She doesn't run any of the nine
+> machines — she watches all of them, so somebody else doesn't have to.
 
 ![May, character sheet](zer0space-carakterdesigne.png)
 
