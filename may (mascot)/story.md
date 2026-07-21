@@ -71,7 +71,8 @@ prove it can come back from nothing. She doesn't pretend otherwise on the log
 *not yet*, because the first one is the kind of lie that only gets found at
 the worst time.
 
-![Terminal, motd](zer0space-terminal.png)
+<img width="1672" height="941" alt="zer0space-wallpaper03" src="https://github.com/user-attachments/assets/7a35faa0-a713-404a-b494-13a63b800601" />
+
 
 ---
 
