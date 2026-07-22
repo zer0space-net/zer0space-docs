@@ -189,6 +189,62 @@ else.
 
 ---
 
+## Rewriting the dashboard without touching the data
+
+The dashboard had been Node.js and Express since the beginning. Rewriting it in
+Python was not a rescue — the old one worked. It was two things the shape of the
+problem kept asking for: the service is mostly a fan-out across slow external APIs
+(nine Glances agents plus the Docker socket proxy), and after the PostgreSQL move
+every route had become async anyway, wrapped by hand because Express 4 does not
+catch a rejected promise from an `async` handler.
+
+The interesting constraint was not the language. It was that **the database was
+live**, with real users, real bcrypt hashes and a real encrypted vault. A rewrite
+that needed a migration would have been a rewrite that could lose the vault.
+
+So three things were treated as fixed points rather than as implementation details:
+
+- **The bcrypt hashes.** Cost 12, same library family, same 72-byte truncation
+  boundary. Existing users sign in without noticing anything happened.
+- **The vault's stored format.** PBKDF2-HMAC-SHA256 at 600 000 iterations,
+  AES-256-GCM, packed as `base64(iv).base64(tag).base64(ciphertext)`. Python's
+  `cryptography` appends the GCM tag to the ciphertext where Node exposes it
+  separately via `getAuthTag()` — so the new code splits the last sixteen bytes
+  back off to keep the bytes on disk identical. That one detail is the difference
+  between a rewrite and a data migration.
+- **The schema.** Every new column is `ADD COLUMN IF NOT EXISTS`, and nothing was
+  renamed. `login_attempts.created_at` keeps a name a fresh design would have
+  chosen differently, because it already exists with data in it.
+
+Two things did have to change, and both were forced by the same fact: **the session
+holds the user's derived vault key.**
+
+Starlette ships session middleware that serialises the session *into the cookie*.
+Using it would have shipped the vault key to the browser. A database-backed session
+store fails for the mirror-image reason — it would write the key to Postgres, which
+is precisely what the vault design exists to prevent. So the sessions are a small
+in-process store and the cookie carries nothing but a signed id, exactly as before.
+
+And the session secret cannot be handed to that middleware at construction time.
+The ASGI middleware stack is frozen the first time the app is called, which happens
+*before* the startup handler runs — and the secret may have to be read out of
+Postgres. The fix is a one-attribute holder object, installed at import and filled
+during startup. It reads like a workaround because it is one; it is written down so
+the next person does not spend an afternoon rediscovering why the obvious version
+does not work.
+
+One genuinely better thing came out of the rewrite. The five status tiles — "nodes
+online 6/7", "infrastructure 2/2" — used to be counted in the browser, and had been
+wrong more than once because two views each counted them their own way. They are now
+computed once on the server. There is one implementation and therefore one answer.
+
+**What stuck:** a rewrite is safe in proportion to how much of it is *not* a
+rewrite. The parts that touch stored bytes — hashes, ciphertext, column names —
+should be treated as an interface with an old version of yourself, not as code you
+own.
+
+---
+
 ## Where this actually stands
 
 A showcase is worth very little if it only shows the finished parts.

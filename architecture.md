@@ -145,6 +145,22 @@ arriving from inside the LAN, or a misconfigured tunnel, still has to authentica
 **The application deliberately contains no auth-provider code.** Identity is
 Cloudflare's job; the app only knows its own users.
 
+The inner layer is designed to stand on its own, because the outer one is not
+switched on yet. In practice that means: no environment-seeded admin (the first
+account is created through a one-time setup wizard that seals itself), accounts
+afterwards only by single-use invitation code, database-backed rate limiting and
+lockout so a container restart does not reset the counters, and CSRF on every
+state-changing request. The full account is in the dashboard repo's
+`docs/security.md`.
+
+**One service is deliberately not stateless: sessions.** The dashboard's session
+store is process memory, because a session holds the user's derived vault key —
+putting it in a cookie would hand the key to the browser, and putting it in
+PostgreSQL would put it in exactly the dump the vault is designed to survive. So
+that one service runs at `replicas: 1` and a restart signs everyone out. It is the
+single place where the stateless rule is broken on purpose, and it is broken in
+memory rather than on disk, so it still costs nothing to reschedule.
+
 > **Status:** the tunnel and the Access policy are configured in the design and in
 > the compose files, but not yet switched on in production. Until they are, the
 > application's own login is the only layer. See [`journey.md`](journey.md#where-this-actually-stands).

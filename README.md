@@ -17,7 +17,7 @@ scheduled anywhere.
 | | |
 |---|---|
 | **[architecture.md](architecture.md)** | The nine machines, how the stateless split works, ingress and auth layers |
-| **[journey.md](journey.md)** | How it got built — the Traefik detour, an overlay network that lied, making the Swarm forget, and a backup that isn't one yet |
+| **[journey.md](journey.md)** | How it got built — the Traefik detour, an overlay network that lied, making the Swarm forget, rewriting the dashboard without touching the data, and a backup that isn't one yet |
 | **[tech-stack.md](tech-stack.md)** | Every technology and why it was chosen — including what was evaluated and dropped |
 | **[examples/](examples/)** | Two generic, copy-pasteable patterns extracted from this build |
 
@@ -58,7 +58,7 @@ Documentation that only shows the finished parts is not worth much, so:
 
 | | |
 |---|---|
-| ✅ **Working** | 7-node Swarm, 3 managers · all persistent files on central NFS · application on PostgreSQL, genuinely stateless · GitOps deploys from git · nightly local backups with visible status · custom dashboard with per-user encrypted credential vault |
+| ✅ **Working** | 7-node Swarm, 3 managers · all persistent files on central NFS · application on PostgreSQL, genuinely stateless · GitOps deploys from git · nightly local backups with visible status · custom dashboard (Python/FastAPI) with invite-only accounts and a per-user encrypted credential vault |
 | 🔄 **Built, not switched on** | Cloudflare Tunnel and the Access policy — compose files and policy design exist, tunnel not yet deployed |
 | ⚠️ **Known broken** | VXLAN overlay to the late-joining workers. Cluster and monitoring work around it; it is not fixed |
 | ❌ **Missing** | Offsite backups · any database backup at all · a restore test |
@@ -78,6 +78,10 @@ That last row is the honest gap in this build. It is
    Retrofitting it costs roughly the port you were avoiding.
 4. **The dangerous backup failure is not the one that breaks.** It is the one that
    keeps reporting success after the data quietly moved somewhere else.
+5. **A rewrite is safe in proportion to how much of it is not a rewrite.** The
+   dashboard changed language, framework and every line of code without a data
+   migration, because hashes, ciphertext format and column names were treated as an
+   interface with the old version rather than as code to own.
 
 ## May
 
@@ -85,6 +89,12 @@ The mascot watching over all this — seven interchangeable nodes, two anchors
 that actually hold state, a tunnel that only calls out, an overlay that quietly
 lied for a while. The full story is in
 [`may (mascot)/story.md`](may%20(mascot)/story.md).
+
+Her artwork in this folder is also the dashboard's design source: the character
+sheet sets the palette, `all2.png` sketches the page layouts, and the ten chibi
+stickers are sliced into the companion that sits in the dashboard's bottom-right
+corner. How that maps to CSS is written up in the dashboard repo's
+`docs/design.md`.
 
 ## Related repositories
 
